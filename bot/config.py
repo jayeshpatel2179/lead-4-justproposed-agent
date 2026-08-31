@@ -56,17 +56,26 @@ DEDUP_COLUMN_INDEXES: tuple[int, ...] = (2, 10)
 
 
 def load_google_credentials_info() -> dict:
-    """Return the service-account dict from GOOGLE_CREDENTIALS_JSON or a local file."""
-    raw = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
-    if raw:
-        return json.loads(raw)
+    """Return the service-account dict from an env var (JSON string) or a local file.
 
-    path = os.getenv("GOOGLE_CREDENTIALS_FILE", "service_account.json").strip()
-    p = Path(path)
+    Accepts the JSON in either GOOGLE_CREDENTIALS_JSON or GOOGLE_CREDENTIALS_FILE
+    (people paste it into the wrong one), and also accepts a file path in either.
+    """
+    for var in ("GOOGLE_CREDENTIALS_JSON", "GOOGLE_CREDENTIALS_FILE"):
+        val = os.getenv(var, "").strip()
+        if not val:
+            continue
+        if val.startswith("{"):
+            return json.loads(val)
+        p = Path(val)
+        if p.is_file():
+            return json.loads(p.read_text(encoding="utf-8"))
+
+    p = Path("service_account.json")
     if p.is_file():
         return json.loads(p.read_text(encoding="utf-8"))
 
     raise RuntimeError(
-        "No Google credentials found. Set GOOGLE_CREDENTIALS_JSON (full JSON string) "
-        "or place a service_account.json next to the bot."
+        "No Google credentials found. Set GOOGLE_CREDENTIALS_JSON to the full "
+        "service-account JSON string, or place service_account.json next to the bot."
     )
