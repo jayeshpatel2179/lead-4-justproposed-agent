@@ -55,27 +55,53 @@ COLUMNS: list[str] = [
 DEDUP_COLUMN_INDEXES: tuple[int, ...] = (2, 10)
 
 
-def load_google_credentials_info() -> dict:
-    """Return the service-account dict from an env var (JSON string) or a local file.
+_CRED_ENV_VARS = (
+    "GOOGLE_CREDENTIALS_JSON",
+    "GOOGLE_CREDENTIALS_FILE",
+    "GOOGLE_APPLICATION_CREDENTIALS_JSON",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "SERVICE_ACCOUNT_JSON",
+)
 
-    Accepts the JSON in either GOOGLE_CREDENTIALS_JSON or GOOGLE_CREDENTIALS_FILE
-    (people paste it into the wrong one), and also accepts a file path in either.
+
+def _coerce_credentials(val: str) -> dict | None:
+    """Turn an env var value into a service-account dict, or None if it isn't one."""
+    val = val.strip().strip("'").strip('"').strip()
+    if not val:
+        return None
+    # A JSON blob pasted directly into the variable.
+    if "{" in val and "}" in val and '"private_key"' in val:
+        blob = val[val.index("{") : val.rindex("}") + 1]
+        return json.loads(blob)
+    # A path to a JSON key file.
+    p = Path(val)
+    if p.is_file():
+        return json.loads(p.read_text(encoding="utf-8"))
+    return None
+
+
+def load_google_credentials_info() -> dict:
+    """Return the service-account dict from any known env var or a local file.
+
+    The JSON can be pasted into any of the vars in _CRED_ENV_VARS (people put it
+    in the wrong one), or those vars can hold a path to the key file.
     """
-    for var in ("GOOGLE_CREDENTIALS_JSON", "GOOGLE_CREDENTIALS_FILE"):
-        val = os.getenv(var, "").strip()
-        if not val:
-            continue
-        if val.startswith("{"):
-            return json.loads(val)
-        p = Path(val)
-        if p.is_file():
-            return json.loads(p.read_text(encoding="utf-8"))
+    for var in _CRED_ENV_VARS:
+        info = _coerce_credentials(os.getenv(var, ""))
+        if info:
+            return info
 
     p = Path("service_account.json")
     if p.is_file():
         return json.loads(p.read_text(encoding="utf-8"))
 
+    present = [v for v in _CRED_ENV_VARS if os.getenv(v, "").strip()]
     raise RuntimeError(
-        "No Google credentials found. Set GOOGLE_CREDENTIALS_JSON to the full "
-        "service-account JSON string, or place service_account.json next to the bot."
+        "No Google credentials found. Paste the full service-account JSON into a "
+        "Railway variable named GOOGLE_CREDENTIALS_JSON. "
+        + (
+            f"(These credential vars are set but unusable: {present})"
+            if present
+            else "(No credential env var is set at all.)"
+        )
     )
