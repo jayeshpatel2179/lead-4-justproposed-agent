@@ -1,6 +1,8 @@
 """Append-only writer for the one fixed Google Sheet."""
 from __future__ import annotations
 
+import re
+
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -31,19 +33,44 @@ def _worksheet(gc: gspread.Client):
     return sh.sheet1
 
 
-def _key(row: list[str]) -> tuple[str, ...]:
-    return tuple(
-        (row[i].strip().lower() if i < len(row) else "")
-        for i in config.DEDUP_COLUMN_INDEXES
+def _cell(row: list[str], idx: int) -> str:
+    return row[idx].strip() if idx < len(row) and row[idx] is not None else ""
+
+
+def _norm_phone(value: str) -> str:
+    """Digits only, last 10 — so +91 93116 97389 / 919311697389 / 9311697389 match."""
+    digits = re.sub(r"\D", "", value or "")
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def _norm_received(value: str) -> str:
+    """Trim to 'YYYY-MM-DD HH:MM:SS' so formatting noise doesn't break matching."""
+    return (value or "").strip()[:19]
+
+
+def _key(row: list[str]) -> tuple[str, str]:
+    return (
+        _norm_phone(_cell(row, config.PHONE_COLUMN_INDEX)),
+        _norm_received(_cell(row, config.RECEIVED_COLUMN_INDEX)),
     )
 
 
 class AppendResult:
-    def __init__(self, added: int, skipped: int, total_after: int, header_written: bool):
+    def __init__(
+        self,
+        added: int,
+        skipped: int,
+        total_after: int,
+        header_written: bool,
+        added_received: list[str],
+        skipped_received: list[str],
+    ):
         self.added = added
         self.skipped = skipped
         self.total_after = total_after
         self.header_written = header_written
+        self.added_received = added_received
+        self.skipped_received = skipped_received
 
 
 def append_leads(rows: list[list[str]]) -> AppendResult:
@@ -62,14 +89,17 @@ def append_leads(rows: list[list[str]]) -> AppendResult:
     seen = {_key(r) for r in existing[1:]}
 
     new_rows: list[list[str]] = []
-    skipped = 0
+    added_received: list[str] = []
+    skipped_received: list[str] = []
     for row in rows:
         k = _key(row)
+        received = _cell(row, config.RECEIVED_COLUMN_INDEX)
         if k in seen:
-            skipped += 1
+            skipped_received.append(received)
             continue
         seen.add(k)
         new_rows.append(row)
+        added_received.append(received)
 
     if new_rows:
         ws.append_rows(
@@ -80,7 +110,14 @@ def append_leads(rows: list[list[str]]) -> AppendResult:
         )
 
     total_after = len(existing) - 1 + len(new_rows)
-    return AppendResult(len(new_rows), skipped, total_after, header_written)
+    return AppendResult(
+        len(new_rows),
+        len(skipped_received),
+        total_after,
+        header_written,
+        added_received,
+        skipped_received,
+    )
 
 
 def service_account_email() -> str:

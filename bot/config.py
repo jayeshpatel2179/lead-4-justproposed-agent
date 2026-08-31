@@ -50,9 +50,11 @@ COLUMNS: list[str] = [
     "Received",
 ]
 
-# Columns used to decide whether a lead is already in the sheet (0-based index
-# into COLUMNS). Phone + Received timestamp uniquely identifies one submission.
-DEDUP_COLUMN_INDEXES: tuple[int, ...] = (2, 10)
+# A lead is "the same lead" when Phone + Received timestamp match. Re-uploading
+# an overlapping date range only appends the rows whose (phone, received) pair
+# isn't already in the sheet — existing rows are never touched.
+PHONE_COLUMN_INDEX: int = 2
+RECEIVED_COLUMN_INDEX: int = 10
 
 
 _CRED_ENV_VARS = (

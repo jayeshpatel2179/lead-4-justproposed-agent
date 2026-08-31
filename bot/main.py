@@ -27,6 +27,14 @@ log = logging.getLogger("leads-agent")
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{config.SHEET_ID}/edit"
 
 
+def _date_range(received_values: list[str]) -> str:
+    """'2026-08-01 → 2026-08-15' from a list of Received timestamps (or '' if none)."""
+    days = sorted({v.strip()[:10] for v in received_values if v and v.strip()})
+    if not days:
+        return ""
+    return days[0] if len(days) == 1 else f"{days[0]} → {days[-1]}"
+
+
 def _authorised(update: Update) -> bool:
     if not config.ALLOWED_USER_IDS:
         return True
@@ -95,10 +103,19 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await status.edit_text(f"Failed to update the Google Sheet: {exc}")
         return
 
-    lines = [
-        f"Done. Added {result.added} new lead(s), skipped {result.skipped} already present.",
-        f"Sheet now has {result.total_after} lead rows.",
-    ]
+    lines = []
+    if result.added:
+        rng = _date_range(result.added_received)
+        lines.append(f"✅ Added {result.added} new lead(s){f' ({rng})' if rng else ''}.")
+    else:
+        lines.append("✅ Added 0 new leads — everything in this file was already in the sheet.")
+    if result.skipped:
+        rng = _date_range(result.skipped_received)
+        lines.append(
+            f"⏭️ Skipped {result.skipped} duplicate(s){f' ({rng})' if rng else ''} "
+            f"— already in the sheet, not written again."
+        )
+    lines.append(f"📊 Sheet now has {result.total_after} lead rows.")
     if result.header_written:
         lines.append("(Wrote the header row — the sheet was empty.)")
     lines.append(SHEET_URL)
